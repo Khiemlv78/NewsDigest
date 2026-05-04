@@ -1,6 +1,7 @@
 <script>
   import WelcomeSvg1 from './WelcomeSvg1.svelte'
   import WelcomeSvg2 from './WelcomeSvg2.svelte'
+  import CusButton from '$lib/components/ui/CusButton.svelte'
 </script>
 
 <div class="welcome-panel w-full max-w-2xl px-6">
@@ -51,6 +52,15 @@
         </p>
       </div>
     </div>
+  </div>
+
+  <div class="cta-row">
+    <CusButton
+      href="/sources"
+      class="gap-1.5 px-4 py-2 text-sm font-medium text-text-secondary"
+    >
+      Quản lý nguồn tin
+    </CusButton>
   </div>
 </div>
 
@@ -132,5 +142,14 @@
     opacity: 0;
     transform: translateY(8px);
     animation: subtitle-fade 0.6s 1.6s ease forwards;
+  }
+
+  .cta-row {
+    display: flex;
+    justify-content: center;
+    margin-top: 1.25rem;
+    opacity: 0;
+    transform: translateY(6px);
+    animation: subtitle-fade 0.6s 2.1s ease forwards;
   }
 </style>
