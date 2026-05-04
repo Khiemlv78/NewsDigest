@@ -66,9 +66,9 @@ cp .env.example.gateway .env
 
 ---
 
-#### RapidAPI — YouTube Transcripts (required for both options)
+#### RapidAPI — YouTube Transcripts (only if using YouTube sources)
 
-Used to fetch video transcripts so the AI can summarize YouTube content.
+Used to fetch video transcripts so the AI can summarize YouTube content. Skip if you don't plan to add YouTube channel sources.
 
 1. Go to [yt-api on RapidAPI](https://rapidapi.com/ytjar/api/yt-api)
 2. Sign up / log in → **Subscribe** → choose the free tier (Basic)
@@ -111,9 +111,9 @@ This deploys the Worker, builds the frontend with the correct API URL, and deplo
 | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) | ✅ Option A | Direct Gemini API calls |
 | `AI_GATEWAY_URL` | [Cloudflare AI Gateway](https://dash.cloudflare.com) → AI → AI Gateway | ✅ Option B | Gateway URL for Gemini AI calls |
 | `AI_GATEWAY_TOKEN` | Same gateway → Settings | ✅ Option B | Authorization token |
-| `RAPIDAPI_KEY` | [RapidAPI — yt-api](https://rapidapi.com/ytjar/api/yt-api) | ✅ Both | Fetches YouTube subtitles/transcripts |
-| `YOUTUBE_API_KEY` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | ☑️ Both | Optional fallback when YouTube RSS feeds are down |
-| `ADMIN_API_KEY` | Self-generated (`openssl rand -hex 32`) | ☑️ Both | Protects write endpoints (optional) |
+| `RAPIDAPI_KEY` | [RapidAPI — yt-api](https://rapidapi.com/ytjar/api/yt-api) | ☑️ YouTube sources only | Fetches YouTube video transcripts for AI summarization |
+| `YOUTUBE_API_KEY` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | ☑️ YouTube sources only | Lists channel videos (YouTube RSS has been blocked) |
+| `ADMIN_API_KEY` | Self-generated (`openssl rand -hex 32`) | ☑️ Optional | Protects write endpoints |
 
 > **Note:** Set either `GEMINI_API_KEY` **or** `AI_GATEWAY_URL` + `AI_GATEWAY_TOKEN` — not both. If `GEMINI_API_KEY` is present, it takes priority.
 

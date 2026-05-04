@@ -32,11 +32,11 @@ Both are deployed to Cloudflare's free tier. The whole process takes about 10–
 |---|---|---|
 | Cloudflare account | https://dash.cloudflare.com | ✅ Yes (free) |
 | Gemini API key | https://aistudio.google.com/apikey | ✅ Yes (free) — *unless using AI Gateway* |
-| RapidAPI key (yt-api) | https://rapidapi.com/ytjar/api/yt-api | ✅ Yes (free tier) |
-| YouTube Data API v3 key | https://console.cloud.google.com/apis/credentials | ⬜ Only if using YouTube sources |
+| RapidAPI key (yt-api) | https://rapidapi.com/ytjar/api/yt-api | ⬜ Only for YouTube sources — fetches video transcripts |
+| YouTube Data API v3 key | https://console.cloud.google.com/apis/credentials | ⬜ Only for YouTube sources — required to list videos (RSS is blocked) |
 | Admin API key | Self-generated (`openssl rand -hex 32`) | ⬜ Optional, protects write endpoints |
 
-> For AI: **Gemini API key** and **RapidAPI key** are the two keys that block progress if missing. Mention these first.
+> For AI: **Gemini API key** is the only key that blocks the app entirely if missing. RapidAPI and YouTube Data API v3 are both needed only if the user plans to add YouTube channel sources — ask about them together in that context.
 
 ---
 

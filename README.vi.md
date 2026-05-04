@@ -66,9 +66,9 @@ cp .env.example.gateway .env
 
 ---
 
-#### RapidAPI — YouTube Transcripts (bắt buộc cho cả hai tùy chọn)
+#### RapidAPI — YouTube Transcripts (chỉ khi dùng nguồn YouTube)
 
-Dùng để lấy transcript video để AI có thể tóm tắt nội dung YouTube.
+Dùng để lấy transcript video để AI có thể tóm tắt nội dung YouTube. Bỏ qua nếu bạn không có kênh YouTube nào làm nguồn tin.
 
 1. Vào [yt-api trên RapidAPI](https://rapidapi.com/ytjar/api/yt-api)
 2. Đăng ký / đăng nhập → **Subscribe** → chọn gói miễn phí (Basic)
@@ -111,9 +111,9 @@ Lệnh này deploy Worker, build frontend với API URL đúng, và deploy lên 
 | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) | ✅ Tùy chọn A | Gọi Gemini API trực tiếp |
 | `AI_GATEWAY_URL` | [Cloudflare AI Gateway](https://dash.cloudflare.com) → AI → AI Gateway | ✅ Tùy chọn B | Gateway URL cho Gemini AI |
 | `AI_GATEWAY_TOKEN` | Cùng gateway → Settings | ✅ Tùy chọn B | Token xác thực |
-| `RAPIDAPI_KEY` | [RapidAPI — yt-api](https://rapidapi.com/ytjar/api/yt-api) | ✅ Cả hai | Lấy phụ đề/transcript YouTube |
-| `YOUTUBE_API_KEY` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | ☑️ Cả hai | Dự phòng khi RSS feed YouTube bị lỗi |
-| `ADMIN_API_KEY` | Tự tạo (`openssl rand -hex 32`) | ☑️ Cả hai | Bảo vệ write endpoint (tùy chọn) |
+| `RAPIDAPI_KEY` | [RapidAPI — yt-api](https://rapidapi.com/ytjar/api/yt-api) | ☑️ Chỉ khi dùng YouTube | Lấy transcript video YouTube để AI tóm tắt |
+| `YOUTUBE_API_KEY` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | ☑️ Chỉ khi dùng YouTube | Liệt kê video kênh (RSS YouTube đã bị chặn) |
+| `ADMIN_API_KEY` | Tự tạo (`openssl rand -hex 32`) | ☑️ Tùy chọn | Bảo vệ write endpoint |
 
 > **Lưu ý:** Chỉ đặt `GEMINI_API_KEY` **hoặc** `AI_GATEWAY_URL` + `AI_GATEWAY_TOKEN` — không dùng cả hai. Nếu `GEMINI_API_KEY` tồn tại, nó sẽ được ưu tiên.
 
