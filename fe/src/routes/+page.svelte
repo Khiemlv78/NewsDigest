@@ -343,7 +343,9 @@
     if (!selectedArticle || navArticles.length === 0) return
     const idx = navArticles.findIndex((a) => a.id === selectedArticle!.id)
     if (idx > 0) {
-      selectedArticle = navArticles[idx - 1]
+      const article = navArticles[idx - 1]
+      selectedArticle = article
+      void readArticles.markRead(article)
     }
   }
 
@@ -351,7 +353,9 @@
     if (!selectedArticle || navArticles.length === 0) return
     const idx = navArticles.findIndex((a) => a.id === selectedArticle!.id)
     if (idx < navArticles.length - 1) {
-      selectedArticle = navArticles[idx + 1]
+      const article = navArticles[idx + 1]
+      selectedArticle = article
+      void readArticles.markRead(article)
     }
   }
 
