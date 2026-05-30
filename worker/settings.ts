@@ -61,6 +61,11 @@ export const SCRAPER_SETTINGS = {
     maxListingSelectors: 10,
     maxRemoveSelectors: 20,
   },
+  googleNews: {
+    resolveTimeoutMs: 10000,      // timeout per URL resolve (2 HTTP round-trips)
+    resolveDelayMs: 15000,        // delay between each URL decode (avoid rate limit)
+    maxResolvePerFeed: 10,        // max URLs to decode per RSS fetch cycle
+  },
   queue: {
     normalSendBatchSize: 25,
     redditSendBatchSize: 100,
