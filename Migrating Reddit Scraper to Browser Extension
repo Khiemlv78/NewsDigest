@@ -1,0 +1,318 @@
+# Reddit Browser Extension Scraper
+
+Reddit đã chặn JSON API và bot access. Thay thế bằng browser extension để scrape data qua `old.reddit.com` rồi push lên worker API.
+
+## Decisions (confirmed)
+
+| Quyết định | Kết quả |
+|---|---|
+| Extension location | `NewsDigest/extension/` (cùng repo) |
+| Tech stack | WXT + Svelte 5 + Tailwind v4 |
+| Tab scraping | Tab thật (user dùng profile riêng) |
+| Delay giữa posts | 3–5 giây |
+| Auth | `X-Admin-Key` header (có sẵn) |
+| Subreddit list | Pull từ worker API |
+| Trigger | User click button trên popup |
+
+## Flow tổng quan
+
+```mermaid
+sequenceDiagram
+    participant U as User (click button)
+    participant P as Popup UI
+    participant B as Background SW
+    participant C as Content Script
+    participant R as old.reddit.com
+    participant W as Worker API
+
+    U->>P: Click "Scrape All"
+    P->>B: runtime.sendMessage({action: 'start-scrape'})
+    B->>W: GET /api/sources (filter type=reddit)
+    W-->>B: [{id, url, name}, ...]
+
+    loop Mỗi subreddit
+        B->>B: chrome.tabs.create(old.reddit.com/r/xxx/hot)
+        B->>C: tabs.sendMessage({action: 'scrape-listing'})
+        C->>C: Parse DOM → articles[]
+        C-->>B: articles[]
+        B->>W: POST /api/reddit/push-listing
+        W-->>B: {inserted: [{articleId, url}...]}
+        B->>P: progress update
+
+        loop Mỗi bài mới (3-5s delay)
+            B->>B: chrome.tabs.update(tab, {url: post_url})
+            B->>C: tabs.sendMessage({action: 'scrape-post'})
+            C->>C: Parse DOM → content
+            C-->>B: content
+            B->>W: POST /api/reddit/push-content
+            B->>P: progress update
+        end
+    end
+
+    B->>P: done!
+```
+
+## Proposed Changes
+
+### Extension — `NewsDigest/extension/` [NEW]
+
+Dùng **WXT + Svelte 5 + Tailwind v4** (Chrome only, Manifest V3).
+
+---
+
+#### [NEW] `extension/package.json`
+
+```json
+{
+  "name": "newsdigest-reddit-scraper",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "postinstall": "wxt prepare"
+  },
+  "devDependencies": {
+    "@tsconfig/svelte": "^5.0.7",
+    "@types/chrome": "^0.1.36",
+    "@wxt-dev/module-svelte": "^2.0.4",
+    "svelte": "^5.49.2",
+    "svelte-check": "^4.3.6",
+    "typescript": "^5.9.3",
+    "wxt": "^0.20.15"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@wxt-dev/storage": "^1.2.7",
+    "tailwindcss": "^4.1.18"
+  }
+}
+```
+
+#### [NEW] `extension/wxt.config.ts`
+
+- Manifest V3
+- Permissions: `tabs`, `activeTab`, `storage`
+- Host permissions: `*://old.reddit.com/*`
+- Content script: match `*://old.reddit.com/*`
+- Svelte module via `@wxt-dev/module-svelte`
+
+#### [NEW] `extension/src/lib/api.ts`
+
+API client gọi worker (dùng fetch):
+- `getRedditSources(apiUrl, adminKey)` → `GET /api/sources` → lọc `type === 'reddit'` + `enabled === 1`
+- `pushListing(apiUrl, adminKey, payload)` → `POST /api/reddit/push-listing`
+- `pushContent(apiUrl, adminKey, payload)` → `POST /api/reddit/push-content`
+
+#### [NEW] `extension/src/lib/scraper.ts`
+
+Scraping logic chạy trong **content script** context (có DOM access):
+
+**`scrapeRedditListing()`** — Parse listing page `old.reddit.com/r/xxx/hot`:
+- Container: `#siteTable .thing.link:not(.stickied)`
+- Mỗi post → extract:
+  - `title`: `.title a.title` text
+  - `permalink`: `.title a.title` href
+  - `score`: `.score.unvoted` text → parse int
+  - `num_comments`: `.bylink.comments` text → parse int
+  - `selftext_preview`: `.expando .usertext-body` text (300 chars)
+- Filter: `score >= 50 || num_comments >= 15` (match worker settings)
+
+**`scrapeRedditPost()`** — Parse post page `old.reddit.com/r/.../comments/...`:
+- Selftext: `.expando .usertext-body .md` text
+- External link: `a.title` href (nếu không phải self post)
+- Top comments: `.commentarea .comment .entry` (top 25):
+  - Author: `.author` text
+  - Score: `.score.unvoted` text → parse int  
+  - Body: `.usertext-body .md` text (500 chars max)
+  - Top reply: first child `.child .comment` (300 chars max)
+- Format output giống [reddit.ts queue fetcher](file:///c:/Users/trong/OneDrive/Documents/GitHub/NewsDigest/worker/queue/fetchers/reddit.ts) hiện tại
+- Max output: 25000 chars
+
+#### [NEW] `extension/src/entrypoints/popup/` (Popup UI - Svelte)
+
+Components:
+- **Settings panel**: API URL + Admin Key inputs → lưu `@wxt-dev/storage`
+- **Source list**: Danh sách subreddits kéo từ worker (tên + last_fetched)
+- **Scrape button**: "🚀 Scrape All Reddit" → gửi message đến background
+- **Progress panel**: 
+  - Current subreddit name
+  - Phase: "Listing" / "Content (3/15)"
+  - Realtime log lines
+  - Success/error counters
+- **Status indicator**: idle / running / done / error
+
+#### [NEW] `extension/src/entrypoints/reddit-scraper.content.ts`
+
+WXT content script, match `*://old.reddit.com/*`:
+- Lắng nghe `runtime.onMessage`:
+  - `{action: 'scrape-listing'}` → gọi `scrapeRedditListing()` → return results
+  - `{action: 'scrape-post'}` → gọi `scrapeRedditPost()` → return results
+  - `{action: 'ping'}` → return `{ok: true}` (health check)
+
+#### [NEW] `extension/src/entrypoints/background.ts`
+
+Background service worker — **orchestrator chính**:
+
+```
+on message 'start-scrape':
+  1. Fetch reddit sources từ worker API
+  2. Tạo 1 tab (reuse cho toàn bộ session)
+  3. For each source (subreddit):
+     a. Convert URL → old.reddit.com format
+     b. Navigate tab → old.reddit.com/r/xxx/hot
+     c. Wait for page load
+     d. Send 'scrape-listing' → nhận articles[]
+     e. POST /api/reddit/push-listing → nhận inserted[]
+     f. Report progress (listing done)
+     g. For each inserted article:
+        - Navigate tab → old.reddit.com + permalink  
+        - Wait for page load
+        - Send 'scrape-post' → nhận content
+        - POST /api/reddit/push-content
+        - Report progress (content N/total)
+        - Sleep 3-5 seconds
+     h. Report progress (subreddit done)
+  4. Close tab
+  5. Report 'done'
+```
+
+Key behaviors:
+- Chỉ dùng **1 tab duy nhất**, navigate tuần tự
+- `chrome.tabs.onUpdated` listener để detect page load complete
+- Gửi progress events về popup qua `runtime.sendMessage`
+- Nếu popup đóng, background vẫn chạy tiếp (popup re-open sẽ query status)
+- Error handling: nếu 1 post fail → log + skip → tiếp tục post tiếp
+
+---
+
+### Worker API Changes
+
+#### [NEW] `worker/api/routes/reddit.ts`
+
+**`POST /api/reddit/push-listing`** (admin auth required):
+
+Input:
+```typescript
+{
+  source_id: string,
+  articles: Array<{
+    url: string,           // https://www.reddit.com/r/.../comments/...
+    title: string,
+    score: number,
+    num_comments: number,
+    selftext_preview?: string
+  }>
+}
+```
+
+Output:
+```typescript
+{
+  ok: true,
+  inserted: Array<{ articleId: string, url: string }>,
+  updated: number,
+  skipped: number
+}
+```
+
+Logic — **tái sử dụng dedup logic** từ [cron/index.ts](file:///c:/Users/trong/OneDrive/Documents/GitHub/NewsDigest/worker/cron/index.ts) L69-L97:
+- Build `description` string: `⬆{score} 💬{num_comments} r/{subreddit} 📅{date}` + selftext preview
+- Check existing via `ArticleRepo.findBySourceAndUrl()`
+- Nếu bài mới → `ArticleRepo.insert()` → thêm vào `inserted[]`
+- Nếu bài cũ → `updateDescription()` + check `reprocessAfterDays` → reset nếu cần
+- `published_at` = `new Date().toISOString()` (giống fetcher hiện tại)
+- **Không enqueue** — extension sẽ push content riêng
+
+**`POST /api/reddit/push-content`** (admin auth required):
+
+Input:
+```typescript
+{
+  items: Array<{
+    article_id: string,
+    content: string
+  }>
+}
+```
+
+Output:
+```typescript
+{
+  ok: true,
+  received: number,
+  enqueued: number
+}
+```
+
+Logic:
+- `ArticleRepo.updateContent()` cho mỗi item
+- Enqueue vào `CONTENT_QUEUE` cho AI summarization (queue consumer sẽ thấy content đã có → skip fetch → vào thẳng summarize)
+
+---
+
+#### [MODIFY] [source.ts](file:///c:/Users/trong/OneDrive/Documents/GitHub/NewsDigest/worker/scraper/source.ts)
+
+```diff
+ if (type === 'reddit') {
+-    return fetchReddit(source);
++    console.log(`⚠️ Reddit server-side fetching disabled — use browser extension`);
++    return [];
+ }
+```
+
+#### [MODIFY] [cron/index.ts](file:///c:/Users/trong/OneDrive/Documents/GitHub/NewsDigest/worker/cron/index.ts)
+
+```diff
+-  const nonRedditSources = sources.filter(s => s.type !== 'reddit');
+-  const redditSources = sources.filter(s => s.type === 'reddit');
++  // Reddit fetching disabled — handled by browser extension
++  const nonRedditSources = sources.filter(s => s.type !== 'reddit');
++  const redditSources: Source[] = [];
++  const skippedReddit = sources.filter(s => s.type === 'reddit').length;
++  if (skippedReddit > 0) {
++    console.log(`⏭️ Skipping ${skippedReddit} Reddit sources (use browser extension)`);
++  }
+```
+
+#### [MODIFY] [index.ts](file:///c:/Users/trong/OneDrive/Documents/GitHub/NewsDigest/worker/index.ts)
+
+Mount new route:
+```diff
++import reddit from './api/routes/reddit';
+ // ...
++app.route('/api/reddit', reddit);
+```
+
+#### [MODIFY] [queue/fetchers/index.ts](file:///c:/Users/trong/OneDrive/Documents/GitHub/NewsDigest/worker/queue/fetchers/index.ts)
+
+Thêm comment, giữ nguyên `redditFetcher`:
+```diff
+ const FETCHERS: ContentFetcher[] = [
+   youtubeFetcher,
+-  redditFetcher,   // reddit.com
++  redditFetcher,   // reddit.com — legacy: new articles use extension push, kept for queue retry of old items
+   githubFetcher,
+   genericFetcher,
+ ];
+```
+
+---
+
+## Verification Plan
+
+### Automated
+- `npx tsc --noEmit` — worker typecheck sau khi thêm routes
+- `cd extension && npm run build` — extension build thành công
+
+### Manual
+1. Load extension unpacked vào Chrome (dev profile riêng)
+2. Cấu hình API URL (`http://localhost:8787`) + Admin Key trong popup
+3. Click "Scrape All" → verify:
+   - Tab mở `old.reddit.com` và navigate qua từng subreddit
+   - Console logs hiện progress trong popup
+   - Articles xuất hiện trong worker DB (check via `GET /api/articles`)
+   - Content được push → AI summarize chạy qua queue
+4. Check FE hiển thị bài Reddit mới
