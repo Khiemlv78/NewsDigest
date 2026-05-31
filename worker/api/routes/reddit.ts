@@ -60,6 +60,37 @@ async function enqueueMessages(env: Env, messages: ContentScrapeMessage[]): Prom
   return enqueued;
 }
 
+// GET /api/reddit/failed
+// Returns Reddit articles that need content re-scraping (inserted but no summary yet).
+reddit.get('/failed', async (c) => {
+  const authErr = requireAdmin(c);
+  if (authErr) return authErr;
+
+  const days = Math.min(parseInt(c.req.query('days') || '3', 10), 14);
+  const limit = Math.min(parseInt(c.req.query('limit') || '50', 10), 200);
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT a.id, a.url, a.title, a.content IS NOT NULL AS has_content
+     FROM articles a
+     JOIN sources s ON s.id = a.source_id
+     WHERE s.type = 'reddit'
+       AND a.summary IS NULL
+       AND a.published_at >= ?
+     ORDER BY a.published_at DESC
+     LIMIT ?`
+  ).bind(cutoff, limit).all<{ id: string; url: string; title: string; has_content: number }>();
+
+  const articles = (results ?? []).map((r) => ({
+    articleId: r.id,
+    url: r.url,
+    title: r.title,
+    hasContent: r.has_content === 1,
+  }));
+
+  return c.json({ ok: true, total: articles.length, articles });
+});
+
 // POST /api/reddit/push-listing
 reddit.post('/push-listing', async (c) => {
   const authErr = requireAdmin(c);

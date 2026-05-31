@@ -1,4 +1,4 @@
-import type { ListingArticle, PushContentResponse, PushListingResponse, RedditSource } from './types';
+import type { FailedRedditArticle, ListingArticle, PushContentResponse, PushListingResponse, RedditSource } from './types';
 
 function cleanApiUrl(apiUrl: string): string {
   return apiUrl.trim().replace(/\/+$/, '');
@@ -52,4 +52,16 @@ export async function pushContent(
     body: JSON.stringify(payload),
   });
   return readJson<PushContentResponse>(res);
+}
+
+export async function getFailedRedditArticles(
+  apiUrl: string,
+  adminKey: string,
+  days = 3,
+): Promise<FailedRedditArticle[]> {
+  const res = await fetch(`${cleanApiUrl(apiUrl)}/api/reddit/failed?days=${days}`, {
+    headers: adminKey.trim() ? { 'X-Admin-Key': adminKey.trim() } : undefined,
+  });
+  const data = await readJson<{ articles?: FailedRedditArticle[] }>(res);
+  return data.articles || [];
 }

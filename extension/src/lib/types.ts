@@ -20,6 +20,13 @@ export interface InsertedArticle {
   url: string;
 }
 
+export interface FailedRedditArticle {
+  articleId: string;
+  url: string;
+  title: string;
+  hasContent: boolean;
+}
+
 export interface PushListingResponse {
   ok: boolean;
   inserted: InsertedArticle[];
@@ -47,7 +54,7 @@ export interface LogEntry {
 
 export interface ScrapeStatus {
   running: boolean;
-  phase: 'idle' | 'listing' | 'content' | 'done' | 'error' | 'cancelled';
+  phase: 'idle' | 'listing' | 'content' | 'retrying' | 'done' | 'error' | 'cancelled';
   currentSource?: string;
   contentIndex: number;
   contentTotal: number;
@@ -57,6 +64,9 @@ export interface ScrapeStatus {
   inserted: number;
   enqueued: number;
   errors: number;
+  retryTotal: number;
+  retryDone: number;
+  retrySkipped: number;
   startedAt?: string;
   completedAt?: string;
   log: LogEntry[];
@@ -64,6 +74,12 @@ export interface ScrapeStatus {
 
 export interface StartScrapeMessage {
   action: 'start-scrape';
+  apiUrl: string;
+  adminKey: string;
+}
+
+export interface RetryFailedMessage {
+  action: 'retry-failed';
   apiUrl: string;
   adminKey: string;
 }
@@ -76,7 +92,7 @@ export interface CancelScrapeMessage {
   action: 'cancel-scrape';
 }
 
-export type PopupMessage = StartScrapeMessage | GetStatusMessage | CancelScrapeMessage;
+export type PopupMessage = StartScrapeMessage | RetryFailedMessage | GetStatusMessage | CancelScrapeMessage;
 
 export type ContentScriptMessage =
   | { action: 'ping' }

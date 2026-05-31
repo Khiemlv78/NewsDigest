@@ -16,6 +16,9 @@
     inserted: 0,
     enqueued: 0,
     errors: 0,
+    retryTotal: 0,
+    retryDone: 0,
+    retrySkipped: 0,
     log: [],
   };
 
@@ -73,6 +76,18 @@
   async function cancelScrape() {
     const response = await browser.runtime.sendMessage({ action: 'cancel-scrape' });
     if (response?.status) status = response.status;
+  }
+
+  async function retryFailed() {
+    error = '';
+    await saveSettings();
+    const response = await browser.runtime.sendMessage({ action: 'retry-failed', apiUrl, adminKey });
+    if (!response?.ok) {
+      error = response?.error || 'Failed to start retry';
+      if (response?.status) status = response.status;
+      return;
+    }
+    status = response.status;
   }
 
   onMount(() => {
@@ -160,11 +175,12 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-4 gap-2 text-center text-[11px]">
+    <div class="grid grid-cols-5 gap-2 text-center text-[11px]">
       <div class="rounded-xl bg-stone-200/70 p-2"><b class="block text-sm">{status.sourcesDone}/{status.sourcesTotal}</b>Sources</div>
       <div class="rounded-xl bg-stone-200/70 p-2"><b class="block text-sm">{status.listingsFound}</b>Found</div>
       <div class="rounded-xl bg-stone-200/70 p-2"><b class="block text-sm">{status.inserted}</b>New</div>
       <div class="rounded-xl bg-stone-200/70 p-2"><b class="block text-sm">{status.enqueued}</b>Queued</div>
+      <div class="rounded-xl bg-amber-100/80 p-2"><b class="block text-sm">{status.retryDone}/{status.retryTotal}</b>Retry</div>
     </div>
 
     <div class="rounded-2xl border border-stone-300 bg-white/70 p-3 shadow-sm">
@@ -172,7 +188,7 @@
         <div class="min-w-0">
           <p class="truncate text-sm font-semibold">{status.currentSource || 'Idle'}</p>
           <p class="text-xs text-stone-500">
-            {#if status.phase === 'content'}Content {status.contentIndex}/{status.contentTotal}{:else}{status.running ? 'Listing' : 'Ready'}{/if}
+            {#if status.phase === 'content'}Content {status.contentIndex}/{status.contentTotal}{:else if status.phase === 'retrying'}Retry {status.contentIndex}/{status.contentTotal}{:else}{status.running ? 'Listing' : 'Ready'}{/if}
           </p>
         </div>
         <span class="text-xs text-red-700">{status.errors} errors</span>
@@ -185,6 +201,13 @@
           onclick={startScrape}
         >
           Scrape All Reddit
+        </button>
+        <button
+          class="h-10 flex-1 rounded-xl bg-amber-700 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-stone-400"
+          disabled={!canStart}
+          onclick={retryFailed}
+        >
+          Retry Failed
         </button>
         {#if status.running}
           <button class="h-10 rounded-xl border border-stone-300 px-3 text-xs font-semibold" onclick={cancelScrape}>Cancel</button>

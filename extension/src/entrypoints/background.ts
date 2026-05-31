@@ -1,5 +1,5 @@
 import { browser } from 'wxt/browser';
-import { getRedditSources, pushContent, pushListing } from '../lib/api';
+import { getFailedRedditArticles, getRedditSources, pushContent, pushListing } from '../lib/api';
 import type { ContentScriptMessage, ListingArticle, PopupMessage, ScrapeStatus } from '../lib/types';
 
 const INITIAL_STATUS: ScrapeStatus = {
@@ -13,6 +13,9 @@ const INITIAL_STATUS: ScrapeStatus = {
   inserted: 0,
   enqueued: 0,
   errors: 0,
+  retryTotal: 0,
+  retryDone: 0,
+  retrySkipped: 0,
   log: [],
 };
 
@@ -184,6 +187,70 @@ async function runScrape(apiUrl: string, adminKey: string) {
   }
 }
 
+async function runRetryFailed(apiUrl: string, adminKey: string) {
+  let tabId: number | undefined;
+
+  try {
+    const failedArticles = await getFailedRedditArticles(apiUrl, adminKey);
+
+    // Only retry articles that are missing content — articles with content but
+    // no summary should be handled server-side via the AI summarization queue.
+    const needsContent = failedArticles.filter((a) => !a.hasContent);
+    const skippedHasContent = failedArticles.length - needsContent.length;
+
+    updateStatus({ retryTotal: needsContent.length, retrySkipped: skippedHasContent });
+    log('info', `Found ${failedArticles.length} failed articles: ${needsContent.length} need content, ${skippedHasContent} already have content (server-side retry)`);
+
+    if (needsContent.length === 0) {
+      updateStatus({ running: false, phase: 'done', completedAt: new Date().toISOString() });
+      log('success', 'Nothing to retry');
+      return;
+    }
+
+    const tab = await browser.tabs.create({ url: 'about:blank', active: true });
+    if (tab.id === undefined) throw new Error('Failed to create scraping tab');
+    tabId = tab.id;
+
+    for (let i = 0; i < needsContent.length; i++) {
+      if (cancelRequested) break;
+
+      const article = needsContent[i];
+      updateStatus({ phase: 'retrying', contentIndex: i + 1, contentTotal: needsContent.length, currentSource: article.title });
+
+      try {
+        await navigate(tabId, postToOldReddit(article.url));
+        const content = await scrapePost(tabId);
+        if (!content.trim()) throw new Error('No post content extracted');
+
+        const contentResult = await pushContent(apiUrl, adminKey, {
+          items: [{ article_id: article.articleId, content }],
+        });
+        updateStatus({ retryDone: status.retryDone + 1, enqueued: status.enqueued + contentResult.enqueued });
+        log('success', `Retry ${i + 1}/${needsContent.length}: ${article.title.slice(0, 60)}`);
+      } catch (error) {
+        updateStatus({ errors: status.errors + 1 });
+        log('error', `Retry failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      if (i < needsContent.length - 1) await sleep(randomDelay());
+    }
+
+    updateStatus({
+      running: false,
+      phase: cancelRequested ? 'cancelled' : 'done',
+      completedAt: new Date().toISOString(),
+    });
+    log(cancelRequested ? 'error' : 'success', cancelRequested ? 'Retry cancelled' : `Retry complete: ${status.retryDone}/${needsContent.length} recovered`);
+  } catch (error) {
+    updateStatus({ running: false, phase: 'error', errors: status.errors + 1, completedAt: new Date().toISOString() });
+    log('error', error instanceof Error ? error.message : String(error));
+  } finally {
+    activeRun = null;
+    cancelRequested = false;
+    if (tabId !== undefined) await browser.tabs.remove(tabId).catch(() => undefined);
+  }
+}
+
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message: PopupMessage) => {
     if (message?.action === 'get-status') return Promise.resolve({ ok: true, status });
@@ -209,6 +276,24 @@ export default defineBackground(() => {
       cancelRequested = false;
       log('info', 'Starting Reddit scrape');
       activeRun = runScrape(message.apiUrl, message.adminKey);
+      return Promise.resolve({ ok: true, status });
+    }
+
+    if (message?.action === 'retry-failed') {
+      if (activeRun) return Promise.resolve({ ok: false, error: 'Scrape already running', status });
+      if (!message.apiUrl.trim()) return Promise.resolve({ ok: false, error: 'API URL is required', status });
+      if (!message.adminKey.trim()) return Promise.resolve({ ok: false, error: 'Admin key is required', status });
+
+      status = {
+        ...INITIAL_STATUS,
+        running: true,
+        phase: 'retrying',
+        startedAt: new Date().toISOString(),
+        log: [],
+      };
+      cancelRequested = false;
+      log('info', 'Starting retry of failed articles');
+      activeRun = runRetryFailed(message.apiUrl, message.adminKey);
       return Promise.resolve({ ok: true, status });
     }
 
