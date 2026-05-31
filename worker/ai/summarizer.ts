@@ -48,6 +48,7 @@ async function callGemini(
   model = pickModel(),
   attempt = 1,
   timeoutMs?: number,
+  maxTokens = 2048,
 ): Promise<string> {
   return callGeminiApi({
     systemPrompt,
@@ -56,7 +57,7 @@ async function callGemini(
     getOtherModel,
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 2048,
+      maxOutputTokens: maxTokens,
       responseMimeType: 'application/json',
     },
     timeoutMs,
@@ -76,6 +77,7 @@ async function callGeminiPlainText(
   model: string = pickModel(),
   timeoutMs = 60000,
   attempt = 1,
+  maxTokens = 2048,
 ): Promise<string> {
   const text = await callGeminiApi({
     systemPrompt,
@@ -84,7 +86,7 @@ async function callGeminiPlainText(
     getOtherModel,
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 2048,
+      maxOutputTokens: maxTokens,
     },
     timeoutMs,
     attempt,
@@ -190,6 +192,7 @@ async function callGeminiWithJsonRetry<T>(
   systemPrompt: string,
   userPrompt: string,
   timeoutMs?: number,
+  maxTokens = 2048,
 ): Promise<T> {
   let lastError: Error | null = null;
 
@@ -198,7 +201,7 @@ async function callGeminiWithJsonRetry<T>(
     const model = attempt === 1 ? pickModel() : getOtherModel(MODELS[attempt % 2]);
     try {
       console.log(`🤖 Attempt ${attempt}/${MAX_RETRIES} using ${model}`);
-      const raw = await callGemini(env, systemPrompt, userPrompt, model, 1, timeoutMs);
+      const raw = await callGemini(env, systemPrompt, userPrompt, model, 1, timeoutMs, maxTokens);
       const result = extractJson<T>(raw, { repair: true });
       if (attempt > 1) console.log(`✅ JSON valid on attempt ${attempt}`);
       return result;
@@ -360,6 +363,8 @@ export async function generateDigest(
   const userPrompt = `Analyze and synthesize ${articles.length} articles from today:\n\n${formatted}`;
 
   const DIGEST_TIMEOUT = 120000; // 120s — digest prompt is large (40+ articles)
+  const DIGEST_MAX_TOKENS = 4096; // digest output is much larger than article summaries
+  const DIGEST_MIN_LENGTH = 200; // reject suspiciously short digests (placeholders, etc.)
 
   /** Expand short IDs back to full UUIDs + strip any hallucinated IDs */
   function expandIds(text: string): string {
@@ -379,14 +384,78 @@ export async function generateDigest(
     });
   }
 
+  /**
+   * Validate digest text quality — reject model echo, placeholders, and
+   * chain-of-thought "thinking" output that Gemma sometimes produces.
+   */
+  function isValidDigestText(text: string): boolean {
+    if (text.length < DIGEST_MIN_LENGTH) {
+      console.log(`⚠️ Digest too short (${text.length} chars < ${DIGEST_MIN_LENGTH})`);
+      return false;
+    }
+    // Detect model echoing back system prompt / instructions
+    const echoSignals = [
+      /^AI News Editor/i,
+      /^Vietnamese\./im,
+      /^Write a structured daily digest/im,
+      /^\s*\*\s*Opening overview paragraph/im,
+      /^\s*\*\s*Topic groups with/im,
+      /Return \*only\* valid JSON/i,
+    ];
+    const echoCount = echoSignals.filter((p) => p.test(text)).length;
+    if (echoCount >= 2) {
+      console.log(`⚠️ Digest appears to be model echo (${echoCount} echo signals detected)`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Strip model "thinking" and instruction echo from digest plain text.
+   * Gemma models sometimes output their planning before the actual digest.
+   * We look for the real digest start (## heading or overview paragraph with <id:>).
+   */
+  function cleanDigestPlainText(raw: string): string {
+    let text = cleanFallbackResponse(raw);
+
+    // If text contains a clear digest section after model thinking,
+    // try to extract just the digest portion.
+    // Look for the pattern where actual digest starts with "## " or a paragraph
+    // that contains <id:> references — that's the real content.
+    const overviewMatch = text.match(/^(#{1,2}\s+.+|[^\n*]+<id:[a-f0-9-]+>[^\n]*)/m);
+    if (overviewMatch && overviewMatch.index && overviewMatch.index > 100) {
+      // There's a significant preamble before actual digest content — strip it
+      // But first, check if there's an overview paragraph before the first heading
+      const beforeHeading = text.slice(0, overviewMatch.index);
+      // Find last paragraph before the heading that looks like an overview (no * bullets)
+      const paragraphs = beforeHeading.split('\n\n');
+      const overviewParagraphs = paragraphs.filter(
+        (p) => p.trim().length > 50 && !p.trim().startsWith('*') && !p.trim().startsWith('-')
+      );
+      if (overviewParagraphs.length > 0) {
+        // Use the last substantial paragraph as the overview + everything after
+        const lastOverview = overviewParagraphs[overviewParagraphs.length - 1];
+        const overviewIdx = text.lastIndexOf(lastOverview, overviewMatch.index);
+        if (overviewIdx >= 0) {
+          text = text.slice(overviewIdx);
+        }
+      } else {
+        // No overview paragraph found — start from the first heading
+        text = text.slice(overviewMatch.index);
+      }
+    }
+
+    return text.trim();
+  }
+
   // ── Try JSON mode (with retry) ──
   try {
-    const result = await callGeminiWithJsonRetry<DigestResult>(env, digestPrompt, userPrompt, DIGEST_TIMEOUT);
-    if (result.digest_text) {
+    const result = await callGeminiWithJsonRetry<DigestResult>(env, digestPrompt, userPrompt, DIGEST_TIMEOUT, DIGEST_MAX_TOKENS);
+    if (result.digest_text && isValidDigestText(result.digest_text)) {
       result.digest_text = expandIds(result.digest_text);
       return result;
     }
-    console.log('⚠️ Invalid digest structure');
+    console.log('⚠️ Invalid digest structure or content');
   } catch (err: any) {
     console.log(`⚠️ JSON mode digest failed: ${err.message}`);
   }
@@ -394,13 +463,15 @@ export async function generateDigest(
   // ── Last resort: plain text (digest only needs 1 field) ──
   try {
     console.log(`🔄 Trying plain text mode for digest...`);
-    const rawText = cleanFallbackResponse(await callGeminiPlainText(
+    const rawText = await callGeminiPlainText(
       env,
       digestPrompt,
       userPrompt,
       undefined,
       DIGEST_TIMEOUT,
-    ));
+      1,
+      DIGEST_MAX_TOKENS,
+    );
 
     // Model may return JSON even in plain text mode → try to extract digest_text
     let digestText = rawText;
@@ -408,15 +479,16 @@ export async function generateDigest(
       const parsed = extractJson<DigestResult>(rawText);
       if (parsed.digest_text) digestText = parsed.digest_text;
     } catch {
-      // Not JSON → use raw text as-is
+      // Not JSON → clean and use as plain text
+      digestText = cleanDigestPlainText(rawText);
     }
 
-    if (digestText && digestText.length > 50) {
+    if (isValidDigestText(digestText)) {
       digestText = expandIds(digestText);
       console.log(`✅ Plain text digest succeeded (${digestText.length} chars)`);
       return { digest_text: digestText };
     }
-    console.log('⚠️ Plain text digest too short');
+    console.log('⚠️ Plain text digest failed validation');
     return null;
   } catch (fallbackErr: any) {
     console.error(`❌ All digest strategies failed: ${fallbackErr.message}`);
