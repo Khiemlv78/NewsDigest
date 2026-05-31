@@ -13,6 +13,13 @@ export async function scheduledDigest(env: Env, date?: string) {
 
   const digestDate = date || getVnDateString();
 
+  // Set initial status to 'GENERATING' so clients know a regeneration is in progress
+  await DigestRepo.upsert(env.DB, {
+    date: digestDate,
+    summaryText: 'GENERATING',
+    totalFetched: 0,
+  });
+
   // Tính UTC range cho ngày VN
   const dayStartUTC = new Date(`${digestDate}T00:00:00+07:00`);
   const dayEndUTC = new Date(dayStartUTC.getTime() + 24 * 60 * 60 * 1000);
@@ -25,6 +32,7 @@ export async function scheduledDigest(env: Env, date?: string) {
 
   if (results.length === 0) {
     console.log(`📰 No summarized articles for ${digestDate}, skipping digest.`);
+    await DigestRepo.deleteByDate(env.DB, digestDate);
     return;
   }
 
@@ -34,6 +42,7 @@ export async function scheduledDigest(env: Env, date?: string) {
     const digest = await generateDigest(results, env);
     if (!digest) {
       console.log('📰 Digest generation returned null.');
+      await DigestRepo.deleteByDate(env.DB, digestDate);
       return;
     }
 
@@ -46,5 +55,6 @@ export async function scheduledDigest(env: Env, date?: string) {
     console.log(`📰 Digest saved for ${digestDate} (${digest.digest_text.length} chars, ${results.length} articles)`);
   } catch (err: any) {
     console.error('❌ Digest generation failed:', err.message);
+    await DigestRepo.deleteByDate(env.DB, digestDate);
   }
 }

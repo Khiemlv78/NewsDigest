@@ -399,14 +399,7 @@ async function forceRefresh(date: string) {
     if (_currentDate === date) {
       await loadDate(date);
     } else {
-      await cacheDb.saveDigest(date, null);
-      const idbCached = await cacheDb.getArticles(date);
-      if (idbCached) {
-        await cacheDb.saveArticles(date, {
-          ...idbCached,
-          timestamp: 0,
-        });
-      }
+      await cacheDb.deleteDateCache(date);
     }
   }
 }
@@ -414,14 +407,7 @@ async function forceRefresh(date: string) {
 async function invalidateCache(date: string) {
   memoryCache.delete(date);
   digestCache.delete(date);
-  await cacheDb.saveDigest(date, null);
-  const idbCached = await cacheDb.getArticles(date);
-  if (idbCached) {
-    await cacheDb.saveArticles(date, {
-      ...idbCached,
-      timestamp: 0,
-    });
-  }
+  await cacheDb.deleteDateCache(date);
 }
 
 // ── Initialization (browser only) ────────────────────

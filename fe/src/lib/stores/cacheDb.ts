@@ -223,3 +223,17 @@ export async function migrateFromLocalStorage(): Promise<void> {
     console.warn('[cacheDb] Migration failed (non-fatal)', e);
   }
 }
+
+export async function deleteDateCache(date: string): Promise<void> {
+  try {
+    const db = await getDb();
+    const tx = db.transaction(['articles', 'digests'], 'readwrite');
+    await Promise.all([
+      tx.objectStore('articles').delete(date),
+      tx.objectStore('digests').delete(date),
+    ]);
+    await tx.done;
+  } catch (e) {
+    console.warn('[cacheDb] deleteDateCache failed', e);
+  }
+}
