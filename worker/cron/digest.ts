@@ -8,10 +8,10 @@ import { getVnDateString } from '../utils/date';
  * Lấy tất cả bài đã summarized trong ngày hiện tại (VN timezone) →
  * tổng hợp digest → INSERT hoặc UPDATE digest cho ngày đó.
  */
-export async function scheduledDigest(env: Env) {
+export async function scheduledDigest(env: Env, date?: string) {
   console.log(`📰 Digest cron triggered at ${new Date().toISOString()}`);
 
-  const digestDate = getVnDateString();
+  const digestDate = date || getVnDateString();
 
   // Tính UTC range cho ngày VN
   const dayStartUTC = new Date(`${digestDate}T00:00:00+07:00`);
