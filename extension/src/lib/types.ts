@@ -97,4 +97,5 @@ export type PopupMessage = StartScrapeMessage | RetryFailedMessage | GetStatusMe
 export type ContentScriptMessage =
   | { action: 'ping' }
   | { action: 'scrape-listing' }
-  | { action: 'scrape-post' };
+  | { action: 'scrape-post' }
+  | { action: 'simulate-scroll' };

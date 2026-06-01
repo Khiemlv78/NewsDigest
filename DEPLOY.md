@@ -18,11 +18,12 @@
 Explain to the user:
 
 **What is NewsDigest?**
-NewsDigest is a self-hosted app with two parts:
+NewsDigest is a self-hosted app with two deployed parts, plus an optional Reddit browser extension:
 - A **Worker** (backend API + cron job) running on Cloudflare Workers — it scrapes sources, calls the AI, and stores data.
 - A **Frontend** (PWA) running on Cloudflare Pages — the reader interface.
+- An optional **Reddit browser extension** — used to collect Reddit posts through `old.reddit.com` because Reddit blocks server-side/datacenter scraping.
 
-Both are deployed to Cloudflare's free tier. The whole process takes about 10–15 minutes the first time.
+The Worker and Frontend are deployed to Cloudflare's free tier. The whole process takes about 10–15 minutes the first time.
 
 ---
 
@@ -34,9 +35,11 @@ Both are deployed to Cloudflare's free tier. The whole process takes about 10–
 | Gemini API key | https://aistudio.google.com/apikey | ✅ Yes (free) — *unless using AI Gateway* |
 | RapidAPI key (yt-api) | https://rapidapi.com/ytjar/api/yt-api | ⬜ Only for YouTube sources — fetches video transcripts |
 | YouTube Data API v3 key | https://console.cloud.google.com/apis/credentials | ⬜ Only for YouTube sources — required to list videos (RSS is blocked) |
-| Admin API key | Self-generated (`openssl rand -hex 32`) | ⬜ Optional, protects write endpoints |
+| Admin API key | Self-generated (`openssl rand -hex 32`) | ⬜ Recommended; required by the Reddit extension UI |
 
 > For AI: **Gemini API key** is the only key that blocks the app entirely if missing. RapidAPI and YouTube Data API v3 are both needed only if the user plans to add YouTube channel sources — ask about them together in that context.
+>
+> For Reddit: the Worker no longer scrapes Reddit sources during cron. If the user wants Reddit, deploy the Worker normally, set `ADMIN_API_KEY`, then build/load the browser extension from `extension/`.
 
 ---
 
@@ -86,6 +89,7 @@ npx wrangler login
 ```bash
 npm install
 cd fe && npm install && cd ..
+cd extension && npm install && cd ..
 ```
 
 ---
@@ -164,7 +168,7 @@ Ask for each — make clear they are optional and the user can press Enter to sk
 
 | Variable | How to get | Purpose |
 |---|---|---|
-| `ADMIN_API_KEY` | Run `openssl rand -hex 32` | Protects write endpoints |
+| `ADMIN_API_KEY` | Run `openssl rand -hex 32` | Protects write endpoints and Reddit extension ingestion APIs |
 | `WORKER_PUBLIC_URL` | Your custom Worker domain (if any) | e.g. `https://api.example.com` |
 
 For `ADMIN_API_KEY`, offer to generate one:
@@ -242,6 +246,52 @@ After deploy, the frontend will be live at `https://<PAGES_PROJECT_NAME>.pages.d
 
 ---
 
+## STEP 6 — Reddit browser extension (only if using Reddit sources)
+
+Reddit source collection is intentionally browser-based now. The Worker cron skips `type = reddit` sources, and the extension pushes Reddit listings/content into the Worker API:
+
+- `GET /api/sources` — loads enabled Reddit sources
+- `POST /api/reddit/push-listing` — inserts/updates Reddit article rows
+- `POST /api/reddit/push-content` — stores scraped content and enqueues AI summarization
+- `GET /api/reddit/failed` — finds recent Reddit articles missing content for retry
+
+Prerequisites:
+- The Worker must already be deployed or running locally.
+- `ADMIN_API_KEY` should be set in `.env`, uploaded by `npm run cf:init`, and pasted into the extension popup.
+- Reddit sources must be added in the app, for example `https://www.reddit.com/r/LocalLLaMA/`.
+
+Build the extension:
+
+```bash
+cd extension
+npm run build
+```
+
+Load it in Chrome/Chromium:
+
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select `extension/.output/chrome-mv3/`.
+
+Configure the popup:
+
+| Field | Value |
+|---|---|
+| API URL | Local dev: `http://localhost:8787`; deployed: Worker URL or `WORKER_PUBLIC_URL` |
+| Admin Key | Same value as `ADMIN_API_KEY` |
+
+Use **Scrape All** to collect all enabled Reddit sources. Use **Retry Failed** if articles were inserted but content scraping failed. The extension opens a real `old.reddit.com` tab, navigates sources/posts sequentially, uses human-like delays, pushes content to the Worker, then the normal queue consumer summarizes it.
+
+For extension development:
+
+```bash
+cd extension
+npm run dev
+```
+
+---
+
 ## Re-deploy / Update
 
 After the first deploy, re-deploying is just:
@@ -269,6 +319,9 @@ npm run deploy    # re-deploys with new config
 | Worker deploys but frontend 404s on API | Set `WORKER_PUBLIC_URL` in `.env` and re-run `cf:init` + `npm run deploy:fe` |
 | Both `GEMINI_API_KEY` and gateway vars are set | Remove `GEMINI_API_KEY` if you want to use the gateway, or remove the gateway vars |
 | Articles not summarizing | Check that `RAPIDAPI_KEY` and AI key are correctly set in Cloudflare secrets |
+| Reddit sources never update from cron | Expected behavior. Build/load the extension and run **Scrape All** from the popup |
+| Extension says unauthorized | Paste the same `ADMIN_API_KEY` into the extension popup, then re-run `npm run cf:init` if the secret changed |
+| Extension cannot find sources | Add enabled Reddit sources in the app and verify the API URL points to the Worker, not the Pages frontend |
 
 ---
 

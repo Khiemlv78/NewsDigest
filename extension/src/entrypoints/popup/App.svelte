@@ -37,11 +37,10 @@
   let isTesting = $state(false);
   let isCheckingOnMount = $state(false);
   let testError = $state('');
-  let activeTab = $state<'scraper' | 'sources' | 'settings'>('settings');
+  let activeTab = $state<'scraper' | 'settings'>('settings');
 
   let activeTabIndex = $derived(
-    activeTab === 'scraper' ? 0 :
-    activeTab === 'sources' ? 1 : 2
+    activeTab === 'scraper' ? 0 : 1
   );
 
   let canStart = $derived(Boolean(apiUrl.trim() && adminKey.trim() && !status.running && isVerified));
@@ -231,7 +230,7 @@
 
     <!-- Sliding Tab Switcher (Visible only when connected) -->
     {#if isVerified && !isCheckingOnMount}
-      <div class="relative h-8 bg-black/5 dark:bg-white/5 border border-border/60 rounded-full p-0.5 flex items-center w-[274px] mx-auto mt-1.5 overflow-hidden">
+      <div class="relative h-8 bg-black/5 dark:bg-white/5 border border-border/60 rounded-full p-0.5 flex items-center w-[184px] mx-auto mt-1.5 overflow-hidden">
         <!-- Sliding Indicator -->
         <span 
           class="absolute top-0.5 bottom-0.5 w-[88px] rounded-full border border-white dark:border-white/5 bg-bg-btn shadow-xs transition-transform duration-300 ease-out"
@@ -244,12 +243,6 @@
           class="relative z-10 w-[90px] h-full text-[11px] font-semibold text-center transition-opacity duration-200 cursor-pointer text-text-main" 
           class:opacity-40={activeTab !== 'scraper'}
         >Scraper</button>
-        <button 
-          onclick={() => activeTab = 'sources'} 
-          onpointerdown={handlePress}
-          class="relative z-10 w-[90px] h-full text-[11px] font-semibold text-center transition-opacity duration-200 cursor-pointer text-text-main" 
-          class:opacity-40={activeTab !== 'sources'}
-        >Sources</button>
         <button 
           onclick={() => activeTab = 'settings'} 
           onpointerdown={handlePress}
@@ -456,101 +449,103 @@
           </section>
         </div>
 
-      <!-- Tab 2: Sources Listing -->
-      {:else if activeTab === 'sources'}
-        <section class="relative rounded-2xl border border-white dark:border-white/5 bg-bg-btn shadow-[0_8px_16px_rgba(73,71,69,0.03),0_4px_8px_rgba(73,71,69,0.03)] p-4 flex-1 flex flex-col justify-start animate-in fade-in-0 duration-200">
-          <div class="mb-3 flex items-center justify-between">
-            <h2 class="text-sm font-semibold font-serif">Sources</h2>
-            <span class="text-xs text-text-secondary bg-bg-2 px-2 py-0.5 rounded-full border border-border/40 font-medium tabular-nums">{sources.length} enabled</span>
-          </div>
-          
-          <div class="max-h-[300px] space-y-1.5 overflow-auto pr-1 custom-scrollbar">
-            {#if sources.length === 0}
-              <div class="text-center py-8 text-xs text-text-secondary border border-dashed border-border rounded-xl">
-                No enabled Reddit sources found.
-              </div>
-            {:else}
-              {#each sources as source (source.id)}
-                <div class="rounded-xl bg-bg-2 border border-border/20 p-2.5 flex justify-between items-center gap-2 hover:border-border/60 transition-colors">
-                  <div class="min-w-0">
-                    <p class="truncate text-xs font-semibold text-text-main">{source.name}</p>
-                    <p class="truncate text-[10px] text-text-secondary mt-0.5">Last fetched: {formatDate(source.last_fetched_at)}</p>
-                  </div>
-                </div>
-              {/each}
-            {/if}
-          </div>
-
-          <div class="mt-4 pt-3 border-t border-border/40 flex justify-end">
-            <button 
-              class="h-9 rounded-xl border border-border bg-bg-btn text-text-main text-xs font-semibold hover:bg-bg-2/50 transition-colors disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5 px-4 shadow-xs" 
-              onclick={loadSources} 
-              disabled={isLoadingSources}
-              onpointerdown={handlePress}
-            >
-              <RefreshCw size={12} class={isLoadingSources ? 'animate-spin' : ''} />
-              {isLoadingSources ? 'Syncing...' : 'Sync Sources'}
-            </button>
-          </div>
-        </section>
-
-      <!-- Tab 3: Settings Editor -->
+      <!-- Tab 2: Settings & Sources Editor -->
       {:else if activeTab === 'settings'}
-        <section class="relative rounded-2xl border border-white dark:border-white/5 bg-bg-btn shadow-[0_8px_16px_rgba(73,71,69,0.03),0_4px_8px_rgba(73,71,69,0.03)] p-4 flex flex-col gap-4 animate-in fade-in-0 duration-200">
-          <div class="flex items-center justify-between">
-            <h2 class="text-sm font-semibold font-serif flex items-center gap-1.5">
-              <Settings size={14} class="text-text-secondary" />
-              Settings
-            </h2>
-            {#if settingsSaved}
-              <span class="text-xs font-semibold text-green-600 dark:text-green-400 animate-fade-in-out">Saved</span>
-            {/if}
-          </div>
-          
-          <div class="space-y-3">
-            <div>
-              <label class="block text-[11px] font-medium text-text-secondary mb-1" for="api-url">API URL</label>
-              <input
-                id="api-url"
-                class="h-9 w-full rounded-xl border border-border bg-bg-2 px-3 text-xs text-text-main outline-none focus:border-bw placeholder:text-text-secondary/55 transition-colors"
-                bind:value={apiUrl}
-                placeholder="http://localhost:8787"
-              />
-            </div>
-
-            <div>
-              <label class="block text-[11px] font-medium text-text-secondary mb-1" for="admin-key">Admin Key</label>
-              <input
-                id="admin-key"
-                class="h-9 w-full rounded-xl border border-border bg-bg-2 px-3 text-xs text-text-main outline-none focus:border-bw placeholder:text-text-secondary/55 transition-colors"
-                type="password"
-                bind:value={adminKey}
-                placeholder="X-Admin-Key"
-              />
-            </div>
-
-            <button 
-              onclick={saveAndTestSettings}
-              onpointerdown={handlePress}
-              disabled={isTesting}
-              class="h-10 w-full rounded-xl bg-bw text-bg-1 text-xs font-semibold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-1.5 shadow-sm mt-4 transition-all"
-            >
-              {#if isTesting}
-                <RefreshCw size={12} class="animate-spin" />
-                Testing Connection...
-              {:else}
-                Save & Reconnect
+        <div class="space-y-4 animate-in fade-in-0 duration-200">
+          <!-- Connection Settings Card -->
+          <section class="relative rounded-2xl border border-white dark:border-white/5 bg-bg-btn shadow-[0_8px_16px_rgba(73,71,69,0.03),0_4px_8px_rgba(73,71,69,0.03)] p-4 flex flex-col gap-4">
+            <div class="flex items-center justify-between">
+              <h2 class="text-sm font-semibold font-serif flex items-center gap-1.5">
+                <Settings size={14} class="text-text-secondary" />
+                Settings
+              </h2>
+              {#if settingsSaved}
+                <span class="text-xs font-semibold text-green-600 dark:text-green-400 animate-fade-in-out">Saved</span>
               {/if}
-            </button>
-          </div>
-
-          {#if testError}
-            <div class="rounded-xl border border-red-200/50 bg-red-50/50 dark:bg-red-950/20 dark:border-red-900/30 px-3 py-2 text-[10px] text-red-800 dark:text-red-300 flex items-start gap-1.5">
-              <ShieldAlert size={12} class="shrink-0 mt-0.5" />
-              <div>{testError}</div>
             </div>
-          {/if}
-        </section>
+            
+            <div class="space-y-3">
+              <div>
+                <label class="block text-[11px] font-medium text-text-secondary mb-1" for="api-url">API URL</label>
+                <input
+                  id="api-url"
+                  class="h-9 w-full rounded-xl border border-border bg-bg-2 px-3 text-xs text-text-main outline-none focus:border-bw placeholder:text-text-secondary/55 transition-colors"
+                  bind:value={apiUrl}
+                  placeholder="http://localhost:8787"
+                />
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-medium text-text-secondary mb-1" for="admin-key">Admin Key</label>
+                <input
+                  id="admin-key"
+                  class="h-9 w-full rounded-xl border border-border bg-bg-2 px-3 text-xs text-text-main outline-none focus:border-bw placeholder:text-text-secondary/55 transition-colors"
+                  type="password"
+                  bind:value={adminKey}
+                  placeholder="X-Admin-Key"
+                />
+              </div>
+
+              <button 
+                onclick={saveAndTestSettings}
+                onpointerdown={handlePress}
+                disabled={isTesting}
+                class="h-10 w-full rounded-xl bg-bw text-bg-1 text-xs font-semibold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-1.5 shadow-sm mt-4 transition-all"
+              >
+                {#if isTesting}
+                  <RefreshCw size={12} class="animate-spin" />
+                  Testing Connection...
+                {:else}
+                  Save & Reconnect
+                {/if}
+              </button>
+            </div>
+
+            {#if testError}
+              <div class="rounded-xl border border-red-200/50 bg-red-50/50 dark:bg-red-950/20 dark:border-red-900/30 px-3 py-2 text-[10px] text-red-800 dark:text-red-300 flex items-start gap-1.5">
+                <ShieldAlert size={12} class="shrink-0 mt-0.5" />
+                <div>{testError}</div>
+              </div>
+            {/if}
+          </section>
+
+          <!-- Sources Card -->
+          <section class="relative rounded-2xl border border-white dark:border-white/5 bg-bg-btn shadow-[0_8px_16px_rgba(73,71,69,0.03),0_4px_8px_rgba(73,71,69,0.03)] p-4 flex flex-col justify-start">
+            <div class="mb-3 flex items-center justify-between">
+              <h2 class="text-sm font-semibold font-serif">Sources</h2>
+              <span class="text-xs text-text-secondary bg-bg-2 px-2 py-0.5 rounded-full border border-border/40 font-medium tabular-nums">{sources.length} enabled</span>
+            </div>
+            
+            <div class="max-h-[180px] space-y-1.5 overflow-auto pr-1 custom-scrollbar">
+              {#if sources.length === 0}
+                <div class="text-center py-6 text-xs text-text-secondary border border-dashed border-border rounded-xl">
+                  No enabled Reddit sources found.
+                </div>
+              {:else}
+                {#each sources as source (source.id)}
+                  <div class="rounded-xl bg-bg-2 border border-border/20 p-2 flex justify-between items-center gap-2 hover:border-border/60 transition-colors">
+                    <div class="min-w-0">
+                      <p class="truncate text-xs font-semibold text-text-main">{source.name}</p>
+                      <p class="truncate text-[9px] text-text-secondary mt-0.5">Last fetched: {formatDate(source.last_fetched_at)}</p>
+                    </div>
+                  </div>
+                {/each}
+              {/if}
+            </div>
+
+            <div class="mt-3 pt-3 border-t border-border/40 flex justify-end">
+              <button 
+                class="h-8 rounded-xl border border-border bg-bg-btn text-text-main text-xs font-semibold hover:bg-bg-2/50 transition-colors disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5 px-3 shadow-xs" 
+                onclick={loadSources} 
+                disabled={isLoadingSources}
+                onpointerdown={handlePress}
+              >
+                <RefreshCw size={11} class={isLoadingSources ? 'animate-spin' : ''} />
+                {isLoadingSources ? 'Syncing...' : 'Sync Sources'}
+              </button>
+            </div>
+          </section>
+        </div>
       {/if}
 
     {/if}

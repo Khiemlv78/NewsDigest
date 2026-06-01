@@ -1,11 +1,12 @@
 # NewsDigest
 
-AI-powered daily tech news aggregator. Automatically fetches articles from RSS, Reddit, YouTube, Hacker News, GitHub Trending, and more — then summarizes and scores them using Gemini AI.
+AI-powered daily tech news aggregator. Automatically fetches articles from RSS, YouTube, Hacker News, GitHub Trending, and more, with Reddit collected through a browser extension — then summarizes and scores them using Gemini AI.
 
 ## Architecture
 
 - **Worker** (Cloudflare Workers) — cron scraper, queue consumer, AI summarizer, REST API
 - **Frontend** (SvelteKit on Cloudflare Pages) — PWA reader
+- **Reddit Extension** (WXT + Svelte) — optional browser collector for `old.reddit.com`
 
 **Stack:** Hono · TypeScript · Cloudflare D1 · Cloudflare Queue · Cloudflare KV · Gemini AI
 
@@ -21,6 +22,7 @@ AI-powered daily tech news aggregator. Automatically fetches articles from RSS, 
 ```bash
 npm install
 cd fe && npm install && cd ..
+cd extension && npm install && cd ..
 ```
 
 ### 2. Login to Cloudflare
@@ -74,9 +76,9 @@ Used to fetch video transcripts so the AI can summarize YouTube content. Skip if
 2. Sign up / log in → **Subscribe** → choose the free tier (Basic)
 3. Copy your **X-RapidAPI-Key** from the code examples on the right panel
 
-#### Admin API Key (optional)
+#### Admin API Key
 
-Protects write endpoints (add/delete sources, resummarize). Generate any random string:
+Protects write endpoints (add/delete sources, resummarize, Reddit extension ingestion). Generate any random string:
 
 ```bash
 openssl rand -hex 32
@@ -113,7 +115,7 @@ This deploys the Worker, builds the frontend with the correct API URL, and deplo
 | `AI_GATEWAY_TOKEN` | Same gateway → Settings | ✅ Option B | Authorization token |
 | `RAPIDAPI_KEY` | [RapidAPI — yt-api](https://rapidapi.com/ytjar/api/yt-api) | ☑️ YouTube sources only | Fetches YouTube video transcripts for AI summarization |
 | `YOUTUBE_API_KEY` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | ☑️ YouTube sources only | Lists channel videos (YouTube RSS has been blocked) |
-| `ADMIN_API_KEY` | Self-generated (`openssl rand -hex 32`) | ☑️ Optional | Protects write endpoints |
+| `ADMIN_API_KEY` | Self-generated (`openssl rand -hex 32`) | ☑️ Recommended; required by Reddit extension UI | Protects write endpoints and Reddit extension push APIs |
 
 > **Note:** Set either `GEMINI_API_KEY` **or** `AI_GATEWAY_URL` + `AI_GATEWAY_TOKEN` — not both. If `GEMINI_API_KEY` is present, it takes priority.
 
@@ -154,6 +156,50 @@ npm run dev:fe
 ```
 
 The frontend auto-detects the Worker at `http://localhost:8787` in dev mode — no `.env.local` needed.
+
+---
+
+## Reddit Scraping Extension
+
+Reddit server-side fetching is disabled because Reddit commonly blocks Cloudflare Worker/datacenter traffic. Reddit sources are still supported, but collection is done from a real browser session using the extension in `extension/`.
+
+### How it works
+
+1. Add Reddit sources in NewsDigest as usual, for example `https://www.reddit.com/r/LocalLLaMA/`.
+2. The Worker cron skips sources with `type = reddit`.
+3. The extension loads enabled Reddit sources from `GET /api/sources`.
+4. It opens `old.reddit.com`, scrapes hot listings and post content in a real browser tab.
+5. It pushes listings to `POST /api/reddit/push-listing` and content to `POST /api/reddit/push-content`.
+6. The Worker stores content and enqueues the article for normal AI summarization.
+
+### Install for local use
+
+```bash
+cd extension
+npm install
+npm run build
+```
+
+Then load the generated unpacked extension from `extension/.output/chrome-mv3/` in Chrome or another Chromium browser:
+
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select `extension/.output/chrome-mv3/`.
+
+Open the extension popup and set:
+
+- **API URL:** local `http://localhost:8787`, deployed Worker URL, or custom Worker domain.
+- **Admin Key:** the same value as `ADMIN_API_KEY`.
+
+Use **Scrape All** to collect current Reddit sources. Use **Retry Failed** to revisit recent Reddit articles that were inserted but still have no content.
+
+For development, run:
+
+```bash
+cd extension
+npm run dev
+```
 
 ---
 

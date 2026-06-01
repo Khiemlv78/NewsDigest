@@ -27,8 +27,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function randomDelay(): number {
-  return 3_000 + Math.floor(Math.random() * 2_001);
+/**
+ * Human-like delay using Box-Muller gaussian approximation.
+ * Produces values clustered around 3.5-5s with tails at 2-7s,
+ * plus an occasional longer "distraction" pause (~10% chance).
+ */
+function humanDelay(): number {
+  // ~10% chance of a longer pause (like the user got distracted)
+  if (Math.random() < 0.1) {
+    return 7_000 + Math.floor(Math.random() * 5_001); // 7-12s
+  }
+
+  // Box-Muller: generate gaussian-ish value centered at 4.5s, σ ≈ 1.2s
+  const u1 = Math.random() || 0.001;
+  const u2 = Math.random();
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  const raw = 4_500 + z * 1_200;
+
+  // Clamp to [2000, 7000]
+  return Math.floor(Math.max(2_000, Math.min(7_000, raw)));
 }
 
 function updateStatus(patch: Partial<ScrapeStatus>) {
@@ -96,6 +113,20 @@ async function navigate(tabId: number, url: string): Promise<void> {
   await pingContentScript(tabId);
 }
 
+/**
+ * Ask the content script to simulate human-like scrolling.
+ * Silently ignores errors (e.g. if tab navigated away).
+ */
+async function simulateScroll(tabId: number): Promise<void> {
+  try {
+    await browser.tabs.sendMessage(tabId, { action: 'simulate-scroll' } satisfies ContentScriptMessage);
+    // Small pause after scroll finishes to mimic "reading"
+    await sleep(800 + Math.floor(Math.random() * 1_200));
+  } catch {
+    // Content script might not be ready; that's fine
+  }
+}
+
 async function scrapeListing(tabId: number): Promise<ListingArticle[]> {
   const response = await browser.tabs.sendMessage(tabId, { action: 'scrape-listing' } satisfies ContentScriptMessage);
   if (!response?.ok || !Array.isArray(response.articles)) throw new Error('Listing scrape failed');
@@ -133,6 +164,8 @@ async function runScrape(apiUrl: string, adminKey: string) {
 
       try {
         await navigate(tabId, sourceToOldRedditHot(source.url));
+        // Simulate scrolling through the listing like a human browsing
+        await simulateScroll(tabId);
         const articles = await scrapeListing(tabId);
         updateStatus({ listingsFound: status.listingsFound + articles.length });
 
@@ -148,6 +181,8 @@ async function runScrape(apiUrl: string, adminKey: string) {
 
           try {
             await navigate(tabId, postToOldReddit(article.url));
+            // Simulate reading the post before scraping
+            await simulateScroll(tabId);
             const content = await scrapePost(tabId);
             if (!content.trim()) throw new Error('No post content extracted');
 
@@ -161,7 +196,7 @@ async function runScrape(apiUrl: string, adminKey: string) {
             log('error', `Post failed: ${error instanceof Error ? error.message : String(error)}`);
           }
 
-          if (i < listingResult.inserted.length - 1) await sleep(randomDelay());
+          if (i < listingResult.inserted.length - 1) await sleep(humanDelay());
         }
       } catch (error) {
         updateStatus({ errors: status.errors + 1 });
@@ -219,6 +254,8 @@ async function runRetryFailed(apiUrl: string, adminKey: string) {
 
       try {
         await navigate(tabId, postToOldReddit(article.url));
+        // Simulate reading before scraping
+        await simulateScroll(tabId);
         const content = await scrapePost(tabId);
         if (!content.trim()) throw new Error('No post content extracted');
 
@@ -232,7 +269,7 @@ async function runRetryFailed(apiUrl: string, adminKey: string) {
         log('error', `Retry failed: ${error instanceof Error ? error.message : String(error)}`);
       }
 
-      if (i < needsContent.length - 1) await sleep(randomDelay());
+      if (i < needsContent.length - 1) await sleep(humanDelay());
     }
 
     updateStatus({
