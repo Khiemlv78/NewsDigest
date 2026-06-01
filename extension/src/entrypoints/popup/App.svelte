@@ -3,8 +3,8 @@
   import { storage } from '@wxt-dev/storage';
   import { browser } from 'wxt/browser';
   import { getRedditSources } from '../../lib/api';
-  import type { RedditSource, ScrapeStatus } from '../../lib/types';
-  import { Sun, Moon, Settings, RefreshCw, Play, AlertCircle, Terminal, Ban, Link2, ShieldAlert, Trash2 } from 'lucide-svelte';
+  import type { RedditSource, ScrapeStatus, ScheduleConfig } from '../../lib/types';
+  import { Sun, Moon, Settings, RefreshCw, Play, AlertCircle, Terminal, Ban, Link2, ShieldAlert, Trash2, Clock, Plus, X } from 'lucide-svelte';
 
   const DEFAULT_STATUS: ScrapeStatus = {
     running: false,
@@ -32,6 +32,11 @@
   let error = $state('');
   let darkMode = $state(false);
 
+  // Scheduling states
+  let scheduleEnabled = $state(false);
+  let scheduleTimes = $state<string[]>([]);
+  let newTimeInput = $state('08:00');
+
   // Connection and navigation states
   let isVerified = $state(false);
   let isTesting = $state(false);
@@ -45,9 +50,76 @@
 
   let canStart = $derived(Boolean(apiUrl.trim() && adminKey.trim() && !status.running && isVerified));
 
+  let nextRunDisplay = $derived.by(() => {
+    if (!scheduleEnabled || scheduleTimes.length === 0) return null;
+    const now = new Date();
+    let bestNext = Infinity;
+    let bestTimeStr = '';
+
+    for (const timeStr of scheduleTimes) {
+      const [h, m] = timeStr.split(':').map(Number);
+      const target = new Date();
+      target.setHours(h, m, 0, 0);
+      if (target <= now) {
+        target.setDate(target.getDate() + 1);
+      }
+      const diff = target.getTime() - now.getTime();
+      if (diff < bestNext) {
+        bestNext = diff;
+        bestTimeStr = timeStr;
+      }
+    }
+
+    if (bestTimeStr) {
+      const diffMinutes = Math.round(bestNext / 60000);
+      const diffHours = Math.floor(diffMinutes / 60);
+      const remainingMinutes = diffMinutes % 60;
+      let diffStr = '';
+      if (diffHours > 0) {
+        diffStr += `${diffHours}h `;
+      }
+      diffStr += `${remainingMinutes}m`;
+      return `${bestTimeStr} (in ${diffStr})`;
+    }
+    return null;
+  });
+
   function formatDate(value?: string | null): string {
     if (!value) return 'Never';
     return new Date(value).toLocaleString();
+  }
+
+  async function saveSchedule() {
+    const config = {
+      enabled: scheduleEnabled,
+      times: [...scheduleTimes].sort(),
+    };
+    const response = await browser.runtime.sendMessage({
+      action: 'set-schedule',
+      config,
+    });
+    if (response?.status) {
+      status = response.status;
+      scheduleEnabled = status.scheduleEnabled ?? false;
+      scheduleTimes = status.scheduledTimes ?? [];
+    }
+  }
+
+  async function toggleSchedule() {
+    scheduleEnabled = !scheduleEnabled;
+    await saveSchedule();
+  }
+
+  async function addScheduleTime() {
+    if (!newTimeInput) return;
+    if (scheduleTimes.includes(newTimeInput)) return;
+    scheduleTimes = [...scheduleTimes, newTimeInput].sort();
+    await saveSchedule();
+  }
+
+  async function removeScheduleTime(timeToRemove: string) {
+    scheduleTimes = scheduleTimes.filter(t => t !== timeToRemove);
+    await saveSchedule();
   }
 
   async function saveAndTestSettings() {
@@ -90,7 +162,15 @@
 
   async function refreshStatus() {
     const response = await browser.runtime.sendMessage({ action: 'get-status' });
-    if (response?.status) status = response.status;
+    if (response?.status) {
+      status = response.status;
+      if (status.scheduleEnabled !== undefined) {
+        scheduleEnabled = status.scheduleEnabled;
+      }
+      if (status.scheduledTimes !== undefined) {
+        scheduleTimes = status.scheduledTimes;
+      }
+    }
   }
 
   async function clearLog() {
@@ -147,7 +227,15 @@
 
   onMount(() => {
     const handler = (message: { action?: string; status?: ScrapeStatus }) => {
-      if (message?.action === 'scrape-progress' && message.status) status = message.status;
+      if (message?.action === 'scrape-progress' && message.status) {
+        status = message.status;
+        if (status.scheduleEnabled !== undefined) {
+          scheduleEnabled = status.scheduleEnabled;
+        }
+        if (status.scheduledTimes !== undefined) {
+          scheduleTimes = status.scheduledTimes;
+        }
+      }
     };
 
     void (async () => {
@@ -164,6 +252,13 @@
 
       apiUrl = (await storage.getItem<string>('local:apiUrl')) || apiUrl;
       adminKey = (await storage.getItem<string>('local:adminKey')) || '';
+      
+      const config = await storage.getItem<ScheduleConfig>('local:scheduleConfig');
+      if (config) {
+        scheduleEnabled = config.enabled;
+        scheduleTimes = config.times || [];
+      }
+
       await refreshStatus();
 
       // Silent connection verify if settings exist
@@ -210,6 +305,13 @@
           ></span>
           {status.phase}
         </span>
+
+        {#if scheduleEnabled && scheduleTimes.length > 0}
+          <span class="rounded-full border border-border bg-bg-btn px-2 py-0.5 text-[10px] font-medium text-text-secondary shadow-xs flex items-center gap-1 cursor-help" title="Scheduled at: {scheduleTimes.join(', ')}">
+            <Clock size={10} class="text-green-500" />
+            {scheduleTimes.length} auto
+          </span>
+        {/if}
       </div>
 
       <!-- Theme Toggle Button -->
@@ -511,6 +613,79 @@
                 <div>{testError}</div>
               </div>
             {/if}
+          </section>
+
+          <!-- Auto Schedule Card -->
+          <section class="relative rounded-2xl border border-white dark:border-white/5 bg-bg-btn shadow-[0_8px_16px_rgba(73,71,69,0.03),0_4px_8px_rgba(73,71,69,0.03)] p-4 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <h2 class="text-sm font-semibold font-serif flex items-center gap-1.5">
+                <Clock size={14} class="text-text-secondary" />
+                Auto Schedule
+              </h2>
+              
+              <!-- Switch toggle -->
+              <button 
+                onclick={toggleSchedule}
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none {scheduleEnabled ? 'bg-bw' : 'bg-border/60'}"
+                aria-label="Toggle schedule"
+              >
+                <span 
+                  class="pointer-events-none inline-block size-4 transform rounded-full bg-bg-1 shadow-sm ring-0 transition duration-200 ease-in-out {scheduleEnabled ? 'translate-x-4' : 'translate-x-0'}"
+                ></span>
+              </button>
+            </div>
+
+            <p class="text-[10px] text-text-secondary leading-relaxed">
+              Automatically trigger "Scrape All" at specific times during the day.
+            </p>
+
+            <div class="space-y-2 border-t border-border/40 pt-3">
+              <!-- Times list -->
+              {#if scheduleTimes.length === 0}
+                <div class="text-center py-3 text-[11px] text-text-secondary border border-dashed border-border rounded-xl">
+                  No scheduled times.
+                </div>
+              {:else}
+                <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                  {#each scheduleTimes as time}
+                    <span class="inline-flex items-center gap-1 bg-bg-2 border border-border/20 px-2 py-0.5 rounded-lg text-xs font-semibold tabular-nums text-text-main shadow-xs">
+                      {time}
+                      <button 
+                        onclick={() => removeScheduleTime(time)}
+                        class="text-text-secondary hover:text-text-main cursor-pointer"
+                        aria-label="Remove time"
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  {/each}
+                </div>
+              {/if}
+
+              <!-- Add time input -->
+              <div class="flex items-center gap-2 mt-2">
+                <input 
+                  type="time" 
+                  bind:value={newTimeInput}
+                  class="h-8 flex-1 rounded-xl border border-border bg-bg-2 px-2.5 text-xs text-text-main outline-none focus:border-bw transition-colors"
+                />
+                <button 
+                  onclick={addScheduleTime}
+                  onpointerdown={handlePress}
+                  class="h-8 rounded-xl bg-bw text-bg-1 text-xs font-semibold px-3 hover:opacity-90 cursor-pointer flex items-center gap-1 shadow-sm"
+                >
+                  <Plus size={12} />
+                  Add
+                </button>
+              </div>
+
+              {#if nextRunDisplay}
+                <div class="mt-2 text-[10px] text-text-secondary flex items-center gap-1">
+                  <span class="inline-block size-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                  Next run: <span class="font-semibold text-text-main tabular-nums">{nextRunDisplay}</span>
+                </div>
+              {/if}
+            </div>
           </section>
 
           <!-- Sources Card -->

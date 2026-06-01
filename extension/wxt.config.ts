@@ -8,7 +8,7 @@ export default defineConfig({
   manifest: {
     name: 'NewsDigest Reddit Scraper',
     description: 'Scrape Reddit listings and posts from old.reddit.com into NewsDigest.',
-    permissions: ['tabs', 'activeTab', 'storage'],
+    permissions: ['tabs', 'activeTab', 'storage', 'alarms'],
     host_permissions: [
       '*://old.reddit.com/*',
       'http://localhost/*',

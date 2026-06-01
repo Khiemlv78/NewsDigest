@@ -70,6 +70,8 @@ export interface ScrapeStatus {
   startedAt?: string;
   completedAt?: string;
   log: LogEntry[];
+  scheduledTimes?: string[];
+  scheduleEnabled?: boolean;
 }
 
 export interface StartScrapeMessage {
@@ -96,7 +98,28 @@ export interface ClearLogMessage {
   action: 'clear-log';
 }
 
-export type PopupMessage = StartScrapeMessage | RetryFailedMessage | GetStatusMessage | CancelScrapeMessage | ClearLogMessage;
+export interface ScheduleConfig {
+  enabled: boolean;
+  times: string[];
+}
+
+export interface SetScheduleMessage {
+  action: 'set-schedule';
+  config: ScheduleConfig;
+}
+
+export interface GetScheduleMessage {
+  action: 'get-schedule';
+}
+
+export type PopupMessage =
+  | StartScrapeMessage
+  | RetryFailedMessage
+  | GetStatusMessage
+  | CancelScrapeMessage
+  | ClearLogMessage
+  | SetScheduleMessage
+  | GetScheduleMessage;
 
 export type ContentScriptMessage =
   | { action: 'ping' }

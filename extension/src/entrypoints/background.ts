@@ -1,6 +1,7 @@
 import { browser } from 'wxt/browser';
+import { storage } from '@wxt-dev/storage';
 import { getFailedRedditArticles, getRedditSources, pushContent, pushListing } from '../lib/api';
-import type { ContentScriptMessage, ListingArticle, PopupMessage, ScrapeStatus } from '../lib/types';
+import type { ContentScriptMessage, ListingArticle, PopupMessage, ScrapeStatus, ScheduleConfig } from '../lib/types';
 
 const INITIAL_STATUS: ScrapeStatus = {
   running: false,
@@ -288,9 +289,98 @@ async function runRetryFailed(apiUrl: string, adminKey: string) {
   }
 }
 
+const ALARM_PREFIX = 'auto-scrape-';
+
+function nextOccurrence(timeStr: string): number {
+  const [h, m] = timeStr.split(':').map(Number);
+  const now = new Date();
+  const target = new Date();
+  target.setHours(h, m, 0, 0);
+  if (target <= now) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target.getTime();
+}
+
+async function syncAlarms(config: ScheduleConfig) {
+  const existing = await browser.alarms.getAll();
+  for (const alarm of existing) {
+    if (alarm.name.startsWith(ALARM_PREFIX)) {
+      await browser.alarms.clear(alarm.name);
+    }
+  }
+
+  if (config.enabled) {
+    for (const time of config.times) {
+      await browser.alarms.create(`${ALARM_PREFIX}${time}`, {
+        when: nextOccurrence(time),
+        periodInMinutes: 24 * 60, // repeat daily
+      });
+    }
+  }
+}
+
 export default defineBackground(() => {
+  // Load schedule on startup and sync alarms
+  void (async () => {
+    try {
+      const config = await storage.getItem<ScheduleConfig>('local:scheduleConfig');
+      if (config) {
+        status.scheduleEnabled = config.enabled;
+        status.scheduledTimes = config.times;
+        await syncAlarms(config);
+      } else {
+        status.scheduleEnabled = false;
+        status.scheduledTimes = [];
+      }
+    } catch (err) {
+      console.error('Failed to load schedule on startup:', err);
+    }
+  })();
+
+  // Listen for alarms
+  browser.alarms.onAlarm.addListener(async (alarm) => {
+    if (!alarm.name.startsWith(ALARM_PREFIX)) return;
+    if (activeRun) {
+      log('info', `Scheduled scrape skipped — already running`);
+      return;
+    }
+    const apiUrl = await storage.getItem<string>('local:apiUrl');
+    const adminKey = await storage.getItem<string>('local:adminKey');
+    if (!apiUrl || !adminKey) {
+      log('error', 'Scheduled scrape failed: API URL or Admin Key not configured');
+      return;
+    }
+
+    status = {
+      ...INITIAL_STATUS,
+      running: true,
+      phase: 'listing',
+      startedAt: new Date().toISOString(),
+      log: [],
+      scheduleEnabled: status.scheduleEnabled,
+      scheduledTimes: status.scheduledTimes,
+    };
+    cancelRequested = false;
+    log('info', `Auto-scheduled scrape triggered (${alarm.name.replace(ALARM_PREFIX, '')})`);
+    activeRun = runScrape(apiUrl, adminKey);
+  });
+
   browser.runtime.onMessage.addListener((message: PopupMessage) => {
-    if (message?.action === 'get-status') return Promise.resolve({ ok: true, status });
+    if (message?.action === 'get-status') {
+      return (async () => {
+        try {
+          const config = await storage.getItem<ScheduleConfig>('local:scheduleConfig');
+          if (config) {
+            status.scheduleEnabled = config.enabled;
+            status.scheduledTimes = config.times;
+          }
+        } catch (err) {
+          console.error('Failed to load schedule during get-status:', err);
+        }
+        return { ok: true, status };
+      })();
+    }
 
     if (message?.action === 'clear-log') {
       status.log = [];
@@ -315,6 +405,8 @@ export default defineBackground(() => {
         phase: 'listing',
         startedAt: new Date().toISOString(),
         log: [],
+        scheduleEnabled: status.scheduleEnabled,
+        scheduledTimes: status.scheduledTimes,
       };
       cancelRequested = false;
       log('info', 'Starting Reddit scrape');
@@ -333,11 +425,34 @@ export default defineBackground(() => {
         phase: 'retrying',
         startedAt: new Date().toISOString(),
         log: [],
+        scheduleEnabled: status.scheduleEnabled,
+        scheduledTimes: status.scheduledTimes,
       };
       cancelRequested = false;
       log('info', 'Starting retry of failed articles');
       activeRun = runRetryFailed(message.apiUrl, message.adminKey);
       return Promise.resolve({ ok: true, status });
+    }
+
+    if (message?.action === 'set-schedule') {
+      const config = message.config;
+      status.scheduleEnabled = config.enabled;
+      status.scheduledTimes = config.times;
+
+      void (async () => {
+        try {
+          await storage.setItem('local:scheduleConfig', config);
+          await syncAlarms(config);
+        } catch (err) {
+          console.error('Failed to save or sync schedule:', err);
+        }
+      })();
+
+      return Promise.resolve({ ok: true, status });
+    }
+
+    if (message?.action === 'get-schedule') {
+      return Promise.resolve({ ok: true, config: { enabled: status.scheduleEnabled, times: status.scheduledTimes } });
     }
 
     return undefined;
