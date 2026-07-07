@@ -396,8 +396,18 @@ async function forceRefresh(date: string) {
   } else {
     memoryCache.delete(date);
     digestCache.delete(date);
-    await loadDate(date);
+    if (_currentDate === date) {
+      await loadDate(date);
+    } else {
+      await cacheDb.deleteDateCache(date);
+    }
   }
+}
+
+async function invalidateCache(date: string) {
+  memoryCache.delete(date);
+  digestCache.delete(date);
+  await cacheDb.deleteDateCache(date);
 }
 
 // ── Initialization (browser only) ────────────────────
@@ -421,4 +431,5 @@ export const articleCache = {
   get unsummarizedCount() { return _unsummarizedCount; },
   loadDate,
   forceRefresh,
+  invalidateCache,
 };

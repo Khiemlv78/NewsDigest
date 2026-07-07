@@ -16,7 +16,7 @@ export const SCRAPER_SETTINGS = {
     rssContentEncodedMinChars: 500,
   },
   reddit: {
-    listingLimit: 15,
+    listingLimit: 30,
     minScore: 50,
     minComments: 15,
     sourceStaggerMs: 15000,
@@ -25,11 +25,11 @@ export const SCRAPER_SETTINGS = {
     fetchTimeoutMs: 15000,
     retryDelaySeconds: 120,
     reprocessAfterDays: 1,
-    contentMaxChars: 25000,
-    topCommentsLimit: 25,
-    commentPreviewChars: 500,
-    replyPreviewChars: 300,
-    selfTextPreviewChars: 300,
+    contentMaxChars: 50000,
+    topCommentsLimit: 50,
+    commentPreviewChars: 800,
+    replyPreviewChars: 500,
+    selfTextPreviewChars: 500,
   },
   github: {
     reprocessAfterDays: 3,
@@ -60,6 +60,11 @@ export const SCRAPER_SETTINGS = {
     maxContentSelectors: 8,
     maxListingSelectors: 10,
     maxRemoveSelectors: 20,
+  },
+  googleNews: {
+    resolveTimeoutMs: 10000,      // timeout per URL resolve (2 HTTP round-trips)
+    resolveDelayMs: 3000,         // delay between each URL decode (avoid rate limit)
+    maxResolvePerFeed: 10,        // max URLs to decode per RSS fetch cycle
   },
   queue: {
     normalSendBatchSize: 25,

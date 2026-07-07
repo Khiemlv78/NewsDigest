@@ -3,6 +3,7 @@ import { Source, ArticleInput } from '../../types';
 import { fetchFeedBuffer, isLikelyHtml, normalizeDate } from '../utils';
 import { ContentUnavailableError, ParseError } from '../../errors';
 import { SCRAPER_SETTINGS } from '../../settings';
+import { isGoogleNewsUrl, resolveGoogleNewsUrls } from '../../utils/google-news';
 
 export async function fetchRSS(source: Source): Promise<ArticleInput[]> {
   const { text, contentType, isJsonFeed } = await fetchFeedBuffer(
@@ -75,6 +76,23 @@ export async function fetchRSS(source: Source): Promise<ArticleInput[]> {
   });
 
   const valid = mapped.filter(item => item.url && item.title);
+
+  // ── Google News URL resolution ──────────────────────────────────────────
+  // Google News RSS feeds return encoded URLs (news.google.com/rss/articles/CBMi...)
+  // Decode them to real publisher URLs before returning.
+  // Articles that fail to decode are skipped — they'll be retried next cron cycle.
+  const hasGoogleNewsUrls = valid.some(a => isGoogleNewsUrl(a.url));
+  if (hasGoogleNewsUrls) {
+    const decoded = await resolveGoogleNewsUrls(valid);
+    const remaining = valid.filter(a => !isGoogleNewsUrl(a.url));
+    const skipped = valid.length - remaining.length;
+    console.log(
+      `[rss] google_news_decode: decoded=${decoded} skipped=${skipped} remaining=${remaining.length}`
+    );
+    // Replace valid array with only successfully decoded + non-Google-News articles
+    valid.length = 0;
+    valid.push(...remaining);
+  }
 
   // Diagnostics: RSS feed quality summary
   const withEncoded = valid.filter(a => a.contentEncoded && a.contentEncoded.length > 0).length;

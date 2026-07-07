@@ -53,9 +53,17 @@ digest.post('/generate', async (c) => {
     const authErr = requireAdmin(c);
     if (authErr) return authErr;
 
+    let date = c.req.query('date') || undefined;
+    if (!date && c.req.header('content-type')?.includes('application/json')) {
+        try {
+            const body = await c.req.json();
+            date = body.date;
+        } catch {}
+    }
+
     const { scheduledDigest } = await import('../../cron/digest');
-    await scheduledDigest(c.env);
-    return c.json({ ok: true, message: 'Digest generation triggered' });
+    await scheduledDigest(c.env, date);
+    return c.json({ ok: true, message: `Digest generation triggered for ${date || 'today'}` });
 });
 
 export default digest;

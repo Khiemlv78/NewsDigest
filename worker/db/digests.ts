@@ -40,3 +40,7 @@ export async function deleteOlderThanDate(db: D1Database, cutoffDate: string): P
   ).bind(cutoffDate).run();
   return result.meta?.changes ?? 0;
 }
+
+export async function deleteByDate(db: D1Database, date: string): Promise<void> {
+  await db.prepare('DELETE FROM digests WHERE digest_date = ?').bind(date).run();
+}

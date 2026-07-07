@@ -1,11 +1,12 @@
 # NewsDigest
 
-Trình tổng hợp tin tức công nghệ hàng ngày bằng AI. Tự động lấy bài viết từ RSS, Reddit, YouTube, Hacker News, GitHub Trending và nhiều nguồn khác — sau đó tóm tắt và chấm điểm bằng Gemini AI.
+Trình tổng hợp tin tức công nghệ hàng ngày bằng AI. Tự động lấy bài viết từ RSS, YouTube, Hacker News, GitHub Trending và nhiều nguồn khác, riêng Reddit được cào qua browser extension — sau đó tóm tắt và chấm điểm bằng Gemini AI.
 
 ## Kiến trúc
 
 - **Worker** (Cloudflare Workers) — cron scraper, queue consumer, AI summarizer, REST API
 - **Frontend** (SvelteKit trên Cloudflare Pages) — PWA reader
+- **Reddit Extension** (WXT + Svelte) — browser collector tùy chọn cho `old.reddit.com`
 
 **Stack:** Hono · TypeScript · Cloudflare D1 · Cloudflare Queue · Cloudflare KV · Gemini AI
 
@@ -21,6 +22,7 @@ Trình tổng hợp tin tức công nghệ hàng ngày bằng AI. Tự động l
 ```bash
 npm install
 cd fe && npm install && cd ..
+cd extension && npm install && cd ..
 ```
 
 ### 2. Đăng nhập Cloudflare
@@ -74,9 +76,9 @@ Dùng để lấy transcript video để AI có thể tóm tắt nội dung YouT
 2. Đăng ký / đăng nhập → **Subscribe** → chọn gói miễn phí (Basic)
 3. Copy **X-RapidAPI-Key** từ phần code examples ở bảng bên phải
 
-#### Admin API Key (tùy chọn)
+#### Admin API Key
 
-Bảo vệ các write endpoint (thêm/xóa nguồn, tóm tắt lại). Tạo chuỗi ngẫu nhiên:
+Bảo vệ các write endpoint (thêm/xóa nguồn, tóm tắt lại, nhận dữ liệu từ Reddit extension). Tạo chuỗi ngẫu nhiên:
 
 ```bash
 openssl rand -hex 32
@@ -113,7 +115,7 @@ Lệnh này deploy Worker, build frontend với API URL đúng, và deploy lên 
 | `AI_GATEWAY_TOKEN` | Cùng gateway → Settings | ✅ Tùy chọn B | Token xác thực |
 | `RAPIDAPI_KEY` | [RapidAPI — yt-api](https://rapidapi.com/ytjar/api/yt-api) | ☑️ Chỉ khi dùng YouTube | Lấy transcript video YouTube để AI tóm tắt |
 | `YOUTUBE_API_KEY` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | ☑️ Chỉ khi dùng YouTube | Liệt kê video kênh (RSS YouTube đã bị chặn) |
-| `ADMIN_API_KEY` | Tự tạo (`openssl rand -hex 32`) | ☑️ Tùy chọn | Bảo vệ write endpoint |
+| `ADMIN_API_KEY` | Tự tạo (`openssl rand -hex 32`) | ☑️ Khuyên dùng; UI Reddit extension yêu cầu | Bảo vệ write endpoint và API push của Reddit extension |
 
 > **Lưu ý:** Chỉ đặt `GEMINI_API_KEY` **hoặc** `AI_GATEWAY_URL` + `AI_GATEWAY_TOKEN` — không dùng cả hai. Nếu `GEMINI_API_KEY` tồn tại, nó sẽ được ưu tiên.
 
@@ -154,6 +156,50 @@ npm run dev:fe
 ```
 
 Frontend tự động phát hiện Worker tại `http://localhost:8787` trong dev mode — không cần file `.env.local`.
+
+---
+
+## Reddit Scraping Extension
+
+Server-side fetching cho Reddit đã bị tắt vì Reddit thường chặn traffic từ Cloudflare Worker/datacenter. Source Reddit vẫn được hỗ trợ, nhưng quá trình cào dữ liệu chạy từ một phiên browser thật bằng extension trong `extension/`.
+
+### Cách hoạt động
+
+1. Thêm Reddit source trong NewsDigest như bình thường, ví dụ `https://www.reddit.com/r/LocalLLaMA/`.
+2. Worker cron bỏ qua source có `type = reddit`.
+3. Extension lấy danh sách Reddit source đang bật từ `GET /api/sources`.
+4. Extension mở `old.reddit.com`, cào hot listing và nội dung bài viết trong tab browser thật.
+5. Extension push listing vào `POST /api/reddit/push-listing` và content vào `POST /api/reddit/push-content`.
+6. Worker lưu content và enqueue bài viết vào luồng AI summarization như bình thường.
+
+### Cài để dùng local
+
+```bash
+cd extension
+npm install
+npm run build
+```
+
+Sau đó load unpacked extension được build tại `extension/.output/chrome-mv3/` trong Chrome hoặc trình duyệt Chromium:
+
+1. Mở `chrome://extensions`.
+2. Bật **Developer mode**.
+3. Chọn **Load unpacked**.
+4. Chọn thư mục `extension/.output/chrome-mv3/`.
+
+Mở popup extension và cấu hình:
+
+- **API URL:** `http://localhost:8787` khi dev local, Worker URL đã deploy, hoặc custom Worker domain.
+- **Admin Key:** cùng giá trị với `ADMIN_API_KEY`.
+
+Dùng **Scrape All** để cào các Reddit source hiện có. Dùng **Retry Failed** để cào lại các bài Reddit gần đây đã được insert nhưng vẫn thiếu content.
+
+Khi phát triển extension, chạy:
+
+```bash
+cd extension
+npm run dev
+```
 
 ---
 
