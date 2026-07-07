@@ -10,7 +10,7 @@ AI_GATEWAY_URL = "https://gateway.ai.cloudflare.com/v1/4ade94c28880b53876bf8cd0c
 [[d1_databases]]
 binding = "DB"
 database_name = "newsdigest"
-database_id = "1267d9308-ff28-4c55-875a-dddfe065fa45"
+database_id = "267d9308-ff28-4c55-875a-dddfe065fa45"
 
 [[kv_namespaces]]
 binding = "NEWS_DIGEST_KV"
