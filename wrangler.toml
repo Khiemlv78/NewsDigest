@@ -14,7 +14,7 @@ database_id = "1ab23de3-3ed3-4685-8a9b-b427ea94a502"
 
 [[kv_namespaces]]
 binding = "SCRAPER_CONFIG"
-id = "bd78d3ac29eb432682cb60de67df3f9f"
+id = "40f887dd37bb47ddba8b7676f1021131"
 
 [triggers]
 crons = ["0 */3 * * *", "0 1 * * *", "*/30 * * * *", "30 23 * * *"]
